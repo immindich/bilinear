@@ -33,12 +33,26 @@ class InterpolatedFFN(nn.Module):
         c = (self.interpolate_gelu(a) * b)
         return c @ self.V
     
-class ModelWithInterpolatedLayer(nn.Module):
+class BilinearFFN(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        self.cfg = cfg
+        self.W1 = nn.Parameter(torch.empty(cfg.d_model, cfg.d_mlp))
+        self.W2 = nn.Parameter(torch.empty(cfg.d_model, cfg.d_mlp))
+        self.V = nn.Parameter(torch.empty(cfg.d_mlp, cfg.d_model))
+
+    def forward(self, x):
+        a = x @ self.W1
+        b = x @ self.W2
+        c = (a * b)
+        return c @ self.V
+    
+class ModelWithBilinearLayer(nn.Module):
     def __init__(self, model, layer):
         super().__init__()
         self.model = model
         self.layer_idx = layer
-        self.ffn = InterpolatedFFN(model.cfg).to(device=model.cfg.device, dtype=model.cfg.dtype)
+        self.ffn = BilinearFFN(model.cfg).to(device=model.cfg.device, dtype=model.cfg.dtype)
         self.ffn.W1.data.copy_(model.blocks[layer].mlp.W_gate)
         self.ffn.W2.data.copy_(model.blocks[layer].mlp.W_in)
         self.ffn.V.data.copy_(model.blocks[layer].mlp.W_out)
@@ -52,7 +66,9 @@ class ModelWithInterpolatedLayer(nn.Module):
         output = self.newlayer(input)
         logits = self.model(output, start_at_layer=self.layer_idx+1)
         return logits
-
     
-    def set_interpolation(self, interpolation):
-        self.ffn.interpolation = interpolation
+def save_layer(model, name):
+    torch.save(model.ffn.state_dict(), name)
+
+def load_layer(model, name):
+    model.ffn.load_state_dict(torch.load(name))
