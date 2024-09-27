@@ -67,6 +67,10 @@ class ModelWithBilinearLayer(nn.Module):
         logits = self.model(output, start_at_layer=self.layer_idx+1)
         return logits
     
+    def run_from_modified_layer(self, x):
+        x = self.newlayer(x)
+        return self.model(x, start_at_layer=self.layer_idx+1)
+
 def save_layer(model, name):
     torch.save(model.ffn.state_dict(), name)
 
