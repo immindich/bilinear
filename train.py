@@ -4,6 +4,9 @@ import torch.nn.functional as F
 import numpy as np
 from transformer_lens import HookedTransformer
 from interpolated_ffn import ModelWithBilinearLayer, save_layer
+import signal
+import os
+from torch.utils.tensorboard import SummaryWriter
 
 device = 'cuda'
 dtype = torch.bfloat16
@@ -16,31 +19,65 @@ def sample_batch(size, seq_len):
     return xs.to(device)
 
 model_name = "gemma-2-2b"
-model = HookedTransformer.from_pretrained_no_processing(model_name, device = device, dtype=dtype)
+model_pretrained = HookedTransformer.from_pretrained_no_processing(model_name, device = device, dtype=dtype)
 
 layer = 18
-model_bilinear = ModelWithBilinearLayer(model, layer)
+model_bilinear = ModelWithBilinearLayer(model_pretrained, layer)
 
-steps = 1000
-minibatch_size = 20
+pause_training = False
+stop_training = False
+
+def run_name(layer, step):
+    return f"bilinear-layer-{layer}-step-{step}"
+
+def pause_handler(number, frame):
+    global pause_training
+    global stop_training
+    pause_training = True
+    stop_training = number == signal.SIGUSR2
+
+def train(model, steps, minibatch_size, batch_size, seq_len, lr=1e-5):
+    global pause_training
+    global stop_training
+
+    params = model.ffn.parameters()
+    opt = torch.optim.AdamW(params, lr=lr)
+
+    writer = SummaryWriter(os.path.join("runs", f"bilinear-layer-{layer}"))
+
+    for i in range(steps):
+        opt.zero_grad()
+        batch_loss = 0.0
+        for j in range(batch_size):
+            minibatch = sample_batch(minibatch_size, seq_len)
+            with torch.no_grad():
+                logits_correct = model_pretrained(minibatch)
+            logits = model_bilinear(minibatch)
+            loss = F.mse_loss(logits, logits_correct) / batch_size
+            loss.backward()
+            batch_loss += loss.item()
+        opt.step()
+
+        print(f"Step {i}: {batch_loss}")
+        writer.add_scalar("training loss/step", batch_loss, i)
+
+        if pause_training:
+            print("Signal received, saving checkpoint")
+            save_layer(model, run_name(layer, i) + ".pt")
+            if stop_training:
+                return
+            pause_training = False
+            stop_training = False
+
+    save_layer(model, run_name(layer, steps) + ".pt")
+
+steps = 10000
+minibatch_size = 2
 batch_size = 2
 seq_len = 1024
+lr = 1e-5
 
-params = model_bilinear.ffn.parameters()
-opt = torch.optim.AdamW(params, lr=1e-5)
+signal.signal(signal.SIGUSR1, pause_handler)
+signal.signal(signal.SIGUSR2, pause_handler)
 
-for i in range(steps):
-    opt.zero_grad()
-    batch_loss = 0.0
-    for j in range(batch_size):
-        minibatch = sample_batch(minibatch_size, seq_len)
-        with torch.no_grad():
-            logits_correct = model(minibatch)
-        logits = model_bilinear(minibatch)
-        loss = F.mse_loss(logits, logits_correct) / batch_size
-        loss.backward()
-        batch_loss += loss.item()
-    opt.step()
-    print(f"Step {i}: {batch_loss}")
-
-save_layer(model_bilinear, f"bilinear_layer_{layer}.pt")
+train(model_bilinear, steps, minibatch_size, batch_size, seq_len, lr=lr)
