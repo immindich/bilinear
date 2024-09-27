@@ -51,8 +51,9 @@ def train(model, steps, minibatch_size, batch_size, seq_len, lr=1e-5):
         for j in range(batch_size):
             minibatch = sample_batch(minibatch_size, seq_len)
             with torch.no_grad():
-                logits_correct = model_pretrained(minibatch)
-            logits = model_bilinear(minibatch)
+                res = model_pretrained(minibatch, stop_at_layer=layer)
+                logits_correct = model_pretrained(res, start_at_layer=layer)
+            logits = model_bilinear.run_from_modified_layer(res)
             loss = F.mse_loss(logits, logits_correct) / batch_size
             loss.backward()
             batch_loss += loss.item()
