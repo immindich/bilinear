@@ -2,7 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import copy
-
+from safetensors import safe_open
+from safetensors.torch import save_file
 
 class BilinearFFN(nn.Module):
     def __init__(self, d_model, d_hidden):
@@ -47,6 +48,20 @@ class BilinearFFN(nn.Module):
         c = (a * b)
         return c @ self.V
     
+    def save_layer(self, name):
+        tensors = {
+            "W1": self.W1,
+            "W2": self.W2,
+            "V": self.V
+        }
+        save_file(tensors, name)
+
+    def load_layer(self, name):
+        with safe_open(name, framework="pt") as f:
+            self.W1.data.copy_(f.get_tensor("W1"))
+            self.W2.data.copy_(f.get_tensor("W2"))
+            self.V.data.copy_(f.get_tensor("V"))
+    
 class ModelWithBilinearLayer(nn.Module):
     def __init__(self, model, layer):
         super().__init__()
@@ -70,9 +85,3 @@ class ModelWithBilinearLayer(nn.Module):
     def run_from_modified_layer(self, x):
         x = self.newlayer(x)
         return self.model(x, start_at_layer=self.layer_idx+1)
-
-def save_layer(model, name):
-    torch.save(model.ffn.state_dict(), name)
-
-def load_layer(model, name):
-    model.ffn.load_state_dict(torch.load(name))

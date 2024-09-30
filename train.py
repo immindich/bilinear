@@ -76,16 +76,16 @@ def train(model, name, steps, minibatch_size, batch_size, seq_len, lr=1e-5, loss
 
         if pause_training:
             print("Signal received, saving checkpoint")
-            save_layer(model, run_name(layer, i, name) + ".pt")
+            model.ffn.save_layer(run_name(layer, i, name) + ".safetensors")
             if stop_training:
                 return
             pause_training = False
             stop_training = False
 
         if i != 0 and i % 1000 == 0:
-            save_layer(model, run_name(layer, i, name) + ".pt")
+            model.ffn.save_layer(run_name(layer, i, name) + ".safetensors")
 
-    save_layer(model, run_name(layer, steps, name) + ".pt")
+    model.ffn.save_layer(run_name(layer, steps, name) + ".safetensors")
     writer.flush()
 
 steps = 20_000
